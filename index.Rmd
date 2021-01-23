@@ -1,0 +1,972 @@
+---
+title: "NBA-All-Star Project"
+output: 
+  html_document:
+    toc: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Background
+
+The National Basketball Association All-Star Game is a basketball exhibition game hosted every February by the National Basketball Association (NBA) and showcases 24 of the league's star players. It is the featured event of NBA All-Star Weekend, a three-day event which goes from Friday to Sunday.  
+
+The starting lineup for each squad is selected by a combination of fan, player, and media voting, while head coaches choose the reserves, seven players from their respective conferences, so each side has a 12-man roster. Coaches are not allowed to vote for their own players. If a selected player cannot participate because of injury, the NBA commissioner selects a replacement. 
+
+
+# Data
+
+The training data set used for this project was from 2015 to 2019, 5 seasons in total. 182812 observations and 90 variables are collected from this data set. Each observation is about how the player performed in a certain match, this player’s status and expectation from the gamble websites.  
+
+
+
+# Table of Contents
+
+
+## Project and Data Understanding
+
+The NBA originated in 1946 with 11 teams, and through a sequence of team expansions, reductions, and relocation, currently consists of 30 teams. The United States is home of 29 teams, another one is in Canada. 
+
+The Eastern Conference of the National Basketball Association(NBA) is one of two conferences that makes up the league, the other being the Western Conference. Both Conference are made up of 15 teams organized into three divisions. 
+
+
+### Import Necessary Libraries
+```{r, echo = TRUE, message = FALSE, warning=FALSE}
+library(dplyr)
+library(gridExtra)
+library(data.table)
+library(ggplot2)
+library(tidyverse)
+library(corrplot)
+library(RColorBrewer)
+library(caret)
+```
+
+### Data Glimpse
+```{r, echo = TRUE}
+# load in the data
+data <- read.csv("data.csv")
+# summary(data)
+dim(data)
+head(data)
+tail(data)
+levels(as.factor(data$Team))
+hist(data$Season)
+```
+
+### Check out missing values
+```{r, echo = TRUE}
+
+# count which column has NAs
+NAcols <- which(colSums(is.na(data)) > 0)
+NAcount <- sort(colSums(sapply(data[NAcols], is.na)), decreasing = TRUE)
+NADF <- data.frame(variable = names(NAcount), missing = NAcount)
+
+# change missing value to percentage
+NADF$PectMissing <- round((NADF$missing / nrow(data) * 100), 2)
+
+# visual the missing info
+missingValuePercentage <- NADF %>%
+  ggplot(aes(x = reorder(variable, PectMissing), y = PectMissing)) +
+  geom_bar(stat = 'identity', fill = 'red') + coord_flip(y = c(0, 110)) + 
+  labs(x = "", y = "Percent Missing") + 
+  geom_text(aes(label=paste0(PectMissing, '%'), hjust = -0.1))
+missingValuePercentage
+```
+
+## Data Preparation
+
+### Extract data into 5 seasons
+```{r, echo = TRUE}
+data2015 <- data[data$Season == 2015,]
+data2016 <- data[data$Season == 2016, ]
+data2017 <- data[data$Season == 2017, ]
+data2018 <- data[data$Season == 2018, ]
+data2019 <- data[data$Season == 2019, ]
+data2020 <- data[data$Season == 2020, ]
+
+dim(data2015)
+dim(data2016)
+dim(data2017)
+dim(data2018)
+dim(data2019)
+dim(data2020)
+
+names(data2020)
+#str(data2020)
+```
+
+### Deal with NAs
+### Extract useful predictors
+
+Most of our NAs are caused by when a player was not playing in a specific game. And the rest might be caused by not well recorded because they always occur to almost the whole row. 
+
+```{r, echo = TRUE, results="hide"}
+# data cleaning
+massage = function(dataFrame) {
+  
+  # player did not play in a specific game
+  newData <- dataFrame[dataFrame$Minutes != "Did Not Play", ]
+  
+  # remove rows that have too many NAs
+  newData <- newData[rowSums(is.na(newData)) < 10,]
+  
+  
+  ## extract useful predictor
+  cols <- c(
+    "Player",
+    "Team",
+    
+    "FGM",   # Field Goals Made                     
+    "FGA",   # Field Goals Attempt                  
+    # "FG.",   # Field Goals Percentage              
+    "X3P",   # 3-Points                             
+    "X3PA",  # 3-Points Attempt                     
+    # "X3P.",  # 3-Points Percentage                  
+    "FTM",   # Free Throws Made                     
+    "FTA",   # Free Throws Attempt                 
+    # "FT.",   # Free Throws Percentage              
+    "ORB",   # Offensive Rebounds                   
+    "DRB",   # Defensive Rebounds                   
+    "TRB",   # Total Rebounds                       
+    "AST",   # Assists                             
+    "STL",   # Steals                               
+    "BLK",   # Blocks                              
+    "TOV",   # Turnovers                            
+    "PF",    # Personal Fouls                       
+    "PTS",   # Points                               
+    
+    "X...",  # Points Per Possession                
+             # PT/(FGA+0.44*FTA+TO)
+             # Where PT=Points, FGA=Field-Goal Attempts, 
+             #       FTA=Free-Throw Attempts, TO=Turnovers
+    
+    # "TS.",   # Total Shot Percentage                
+             # PT/(2*(FGA+0.44*FTA))
+             # Where PT=Points, FGA=Field-Goal Attempts, 
+             #       FTA=Free-Throw Attempts
+    
+    # "eFG.",  # Effective Field Goal Percentage      
+             # (FG+0.5*3P)/FGA
+             # Where FG=Field Goals, 3P=Three-Pointers, 
+             #       FGA=Field-Goal Attempts
+    
+    # "X3PAr", # 3-Point Attempt Rate(X3PA/FGA)       
+    # "FTr",   # Free Throw Attempt Rate(FTA/FGA)     
+    
+    "ORB.",  # Offensive Rebound Percentage
+             # 100*(ORB*(TMP/5)/(MP*(TORB+ODRB))
+             # Where ORB=Offensive Rebounds, TMP=Team Minutes Played, 
+             #       MP=Minutes Played, TORB=Team Offensive Rebounds, 
+             #       ODRB=Opponents Defensive Rebounds
+    
+    "DRB.",  # Defensive Rebound Percentage
+    "TRB.",  # Total Rebound Percentage
+    
+    "AST.",  # Assist Percentage
+             # 100*A/(((MP/(TMP/5))*TFG)-FG)
+             # Where A=Assists, MP=Minutes Played, TMP=Team Minutes Played,
+             #       TFG=Team Field Goals, FG=Field Goals
+    
+    "STL.",  # Steal Percentage
+    "BLK.",  # Block Percentage
+    
+    # "TOV.",  # Turnover Percentage
+             # 100*TO/(FGA+0.44*FTA+TO)
+             # Where TO=Turnovers, FGA=Field Goals Attempted, 
+             #       FTA=Free Throws Attempted
+    
+    "USG.",  # Usage Rate                          
+             # 100*((FGA+0.44*FTA+TO)*(TMP/5))/(MP*(TFGA+0.44*TFTA+TTO))
+             # Where FGA=Field-Goal Attempts, FTA=Free-Throw Attempts, 
+             #       TO=Turnovers, TMP=Team Minutes Played, MP=Minutes Played, 
+             #       TFGA=Team Field-Goal Attempts, 
+             #       TFTA=Team Free-Throw Attempts, TTO=Team Turnovers
+    
+    "ORtg",  # Offensive Rating                     
+             # 100*PP/(FGA+0.44*FTA+TO)
+             # Where PP=Points Produced, FGA=Field-Goal Attempts, 
+             #       FTA=Free-Throw Attempts
+    
+    "DRtg",  # Defensive Rating                     # 防守评级
+    "TSA",   # True Shooting Attempts(FGA + 0.44 * FTA.)
+    
+    
+    # Factors Determining Production
+    "PTS.FDP",
+    "AST.TO.FDP",
+    "REB.FDP",
+    "BLK.STL.FDP",
+    "Offensive.FDP", 
+    "Defensive.FDP",
+    "Total.FDP",
+    
+    "PTS.DKP",
+    "AST.TO.DKP",
+    "REB.DKP",
+    "BLK.STL.DKP",
+    "DD.TD.Bonus.DKP",
+    "Offensive.DKP",
+    "Defensive.DKP",
+    "Total.DKP",
+    
+    "PTS.YHP",
+    "AST.TO.YHP",
+    "REB.YHP",
+    "BLK.STL.YHP",
+    "Offensive.YHP",
+    "Defensive.YHP",
+    "Total.YHP",
+    
+    # Points, Rebounds and Assists
+    "Double.Double",                                 
+    "Triple.Double"                                  
+  )
+  newData <- newData[cols]
+  
+  # deal with the remaining NAs
+  newData[is.na(newData)] <- 0
+  
+  return (newData)
+}
+
+cleanData2015 <- massage(data2015)
+cleanData2016 <- massage(data2016)
+cleanData2017 <- massage(data2017)
+cleanData2018 <- massage(data2018)
+cleanData2019 <- massage(data2019)
+cleanData2020 <- massage(data2020)
+
+summary(cleanData2015)
+summary(cleanData2016)
+summary(cleanData2017)
+summary(cleanData2018)
+summary(cleanData2019)
+summary(cleanData2020)
+```
+
+
+### Separate west conference from east conference
+```{r, echo = TRUE}
+West <- c("Golden State Warriors", "Houston Rockets", "Utah Jazz", "Phoenix Suns", 
+          "Denver Nuggets", "Oklahoma City Thunder", "San Antonio Spurs", 
+          "Dallas Mavericks", "Minnesota Timberwolves", "Los Angeles Lakers", 
+          "Los Angeles Clippers", "Memphis Grizzlies", "Portland Trail Blazers", 
+          "Sacramento Kings", "New Orleans Pelicans")
+
+data2015_West <- cleanData2015[cleanData2015$Team %in% West, ]
+data2015_West$Team <- NULL
+data2015_East <- cleanData2015[!(cleanData2015$Team %in% West), ]
+data2015_East$Team <- NULL
+
+data2016_West <- cleanData2016[cleanData2016$Team %in% West, ]
+data2016_West$Team <- NULL
+data2016_East <- cleanData2016[!(cleanData2016$Team %in% West), ]
+data2016_East$Team <- NULL
+
+data2017_West <- cleanData2017[cleanData2017$Team %in% West, ]
+data2017_West$Team <- NULL
+data2017_East <- cleanData2017[!(cleanData2017$Team %in% West), ]
+data2017_East$Team <- NULL
+
+data2018_West <- cleanData2018[cleanData2018$Team %in% West, ]
+data2018_West$Team <- NULL
+data2018_East <- cleanData2018[!(cleanData2018$Team %in% West), ]
+data2018_East$Team <- NULL
+
+data2019_West <- cleanData2019[cleanData2019$Team %in% West, ]
+data2019_West$Team <- NULL
+data2019_East <- cleanData2019[!(cleanData2019$Team %in% West), ]
+data2019_East$Team <- NULL
+
+data2020_West <- cleanData2020[cleanData2020$Team %in% West, ]
+data2020_West$Team <- NULL
+data2020_East <- cleanData2020[!(cleanData2020$Team %in% West), ]
+data2020_East$Team <- NULL
+
+```
+
+
+#### Aggregations
+
+Aggregation sum, average, rank sum and rank average, all grouped by player
+```{r, echo = TRUE, results="hide"}
+# aggregations(sum, mean, rank sum, rank mean)
+aggregateFunc <- function(data) {
+  
+  groupedData <- data %>% group_by(Player)
+  
+  sumData <- groupedData %>% summarise_all(sum)
+  colnames(sumData) <- paste("sum", colnames(sumData), sep = "_")
+  names(sumData)[1] <- "Player"
+  
+  meanData <- groupedData %>% summarise_all(mean)
+  colnames(meanData) <- paste("mean", colnames(meanData), sep = "_")
+  
+  sumDataRank <- (-sumData[, -1]) %>% apply(2, rank)
+  glimpse(sumDataRank)
+  colnames(sumDataRank) <- paste("rank", colnames(sumDataRank), sep = "_")
+  
+  meanDataRank <- (-meanData[, -1]) %>% apply(2, rank)
+  colnames(meanDataRank) <- paste("rank", colnames(meanDataRank), sep = "_")
+
+  return (sumData %>% 
+            cbind(meanData[, -1]) %>% 
+            cbind(sumDataRank) %>% 
+            cbind(meanDataRank)
+          )
+
+}
+
+# apply function to datasets
+# season 2015
+data2015_East_Aggr <- aggregateFunc(data2015_East)
+data2015_West_Aggr <- aggregateFunc(data2015_West)
+
+# season 2016
+data2016_East_Aggr <- aggregateFunc(data2016_East)
+data2016_West_Aggr <- aggregateFunc(data2016_West)
+
+# season 2017
+data2017_East_Aggr <- aggregateFunc(data2017_East)
+data2017_West_Aggr <- aggregateFunc(data2017_West)
+
+# season 2018
+data2018_East_Aggr <- aggregateFunc(data2018_East)
+data2018_West_Aggr <- aggregateFunc(data2018_West)
+
+# season 2019
+data2019_East_Aggr <- aggregateFunc(data2019_East)
+data2019_West_Aggr <- aggregateFunc(data2019_West)
+
+# season 2020
+data2020_East_Aggr <- aggregateFunc(data2020_East)
+data2020_West_Aggr <- aggregateFunc(data2020_West)
+
+
+
+```
+
+
+
+#### New Feature
+
+
+Add player selection results in previous seasons as the target variable
+```{r, echo = TRUE}
+# Players who have been selected as all star in each season
+allstar2015east <- c('John Wall', 'Kyle Lowry', 'LeBron James', 'Pau Gasol',
+                     'Carmelo Anthony', 'Al Horford', 'Chris Bosh', 'Paul Millsap',
+                     'Jimmy Butler', 'Dwyane Wade', 'Jeff Teague', 'Kyrie Irving',
+                     'Kyle Korver')
+
+allstar2015west <- c('Stephen Curry', 'Kobe Bryant', 'Anthony Davis', 'Marc Gasol', 
+                     'Blake Griffin', 'LaMarcus Aldridge', 'Tim Duncan', 
+                     'Kevin Durant', 'Klay Thompson', 'Russell Westbrook', 
+                     'James Harden', 'Chris Paul', 'DeMarcus Cousins', 
+                     'Damian Lillard', 'Dirk Nowitzki')
+
+allstar2016east <- c('Dwyane Wade', 'Kyle Lowry', 'LeBron James', 'Paul George', 
+                     'Carmelo Anthony', 'Jimmy Butler', 'Chris Bosh', 'John Wall', 
+                     'Paul Millsap', 'DeMar DeRozan', 'Andre Drummond', 
+                     'Isaiah Thomas', 'Pau Gasol', 'Al Horford')
+
+allstar2016west <- c('Stephen Curry', 'Russell Westbrook', 'Kobe Bryant', 
+                     'Kevin Durant', 'Kawhi Leonard', 'Chris Paul', 
+                     'LaMarcus Aldridge', 'James Harden', 'Anthony Davis', 
+                     'DeMarcus Cousins', 'Klay Thompson', 'Draymond Green')
+
+allstar2017east <- c('Kyrie Irving', 'DeMar DeRozan', 'LeBron James', 'Jimmy Butler', 
+                     'Giannis Antetokounmpo', 'Isaiah Thomas', 'John Wall', 
+                     'Kevin Love', 'Carmelo Anthony', 'Kyle Lowry', 'Paul George', 
+                     'Kemba Walker', 'Paul Millsap')
+
+allstar2017west <- c('Stephen Curry', 'James Harden', 'Kevin Durant', 'Kawhi Leonard', 
+                     'Anthony Davis', 'Russell Westbrook', 'Klay Thompson', 
+                     'Draymond Green', 'DeMarcus Cousins', 'Marc Gasol', 
+                     'DeAndre Jordan', 'Gordon Hayward')
+
+allstar2018east <- c('Kyrie Irving', 'DeMar DeRozan', 'LeBron James', 'Joel Embiid', 
+                     'Giannis Antetokounmpo', 'Bradley Beal', 'Goran Dragic', 
+                     'Al Horford', 'Kevin Love', 'Kyle Lowry', 'Victor Oladipo', 
+                     'Kristaps Porzingis', 'John Wall', 'Andre Drummond', 'Kemba Walker')
+
+allstar2018west <- c('Stephen Curry', 'James Harden', 'Kevin Durant', 
+                     'DeMarcus Cousins', 'Anthony Davis', 'Russell Westbrook', 
+                     'Damian Lillard', 'Draymond Green', 'Karl-Anthony Towns', 
+                     'LaMarcus Aldridge', 'Klay Thompson', 'Jimmy Butler', 'Paul George')
+
+allstar2019east <- c('Kemba Walker', 'Kyrie Irving', 'Kawhi Leonard', 
+                     'Giannis Antetokounmpo', 'Joel Embiid', 'Kyle Lowry', 
+                     'Victor Oladipo', 'Khris Middleton', 'Bradley Beal', 
+                     'Ben Simmons', 'Blake Griffin', 'Nikola Vucevic', 'Dwyane Wade', 
+                     "D'Angelo Russell")
+
+allstar2019west <- c('Stephen Curry', 'James Harden', 'Kevin Durant', 'Paul George', 
+                     'LeBron James', 'Russell Westbrook', 'Damian Lillard', 
+                     'Klay Thompson', 'Anthony Davis', 'LaMarcus Aldridge', 
+                     'Nikola Jokic', 'Karl-Anthony Towns', 'Dirk Nowitzki')
+
+
+# season 2015
+d2015east <- data2015_East_Aggr
+d2015east$select <- 0
+d2015east$select[d2015east$Player %in% allstar2015east] <- 1
+
+d2015west <- data2015_West_Aggr
+d2015west$select <- 0
+d2015west$select[d2015west$Player %in% allstar2015west] <- 1
+
+# season 2016
+d2016east <- data2016_East_Aggr
+d2016east$select <- 0
+d2016east$select[d2016east$Player %in% allstar2016east] <- 1
+
+d2016west <- data2016_West_Aggr
+d2016west$select <- 0
+d2016west$select[d2016west$Player %in% allstar2016west] <- 1
+
+# season 2017
+d2017east <- data2017_East_Aggr
+d2017east$select <- 0
+d2017east$select[d2017east$Player %in% allstar2017east] <- 1
+
+d2017west <- data2017_West_Aggr
+d2017west$select <- 0
+d2017west$select[d2017west$Player %in% allstar2017west] <- 1
+
+# season 2018
+d2018east <- data2018_East_Aggr
+d2018east$select <- 0
+d2018east$select[d2018east$Player %in% allstar2018east] <- 1
+
+d2018west <- data2018_West_Aggr
+d2018west$select <- 0
+d2018west$select[d2018west$Player %in% allstar2018west] <- 1
+
+# season 2019
+d2019east <- data2019_East_Aggr
+d2019east$select <- 0
+d2019east$select[d2019east$Player %in% allstar2019east] <- 1
+
+d2019west <- data2019_West_Aggr
+d2019west$select <- 0
+d2019west$select[d2019west$Player %in% allstar2019west] <- 1
+
+```
+
+
+
+#### Separate training dataset and testing dataset
+```{r, echo = TRUE, results="hide"}
+cor(d2019east[, -1]) %>% abs() > 0.9
+cor2019east <- cor(d2019east[, -1])
+```
+```{r, echo = TRUE}
+corrplot(cor2019east, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+
+```
+
+
+#### Feature selection
+
+Used Boruta algorithm feature selection to select the important features. I used Boruta Algorithm to extract all the important features from the dataset. Then I used these features to create our logistic model and classification trees.  As the plot shows below, the red and green color shows whether the variable is important or not, yellow indicates tentative features which can not decide.  
+```{r, echo = TRUE, message=FALSE, warning=FALSE}
+## use boruta package to find relevant features 
+
+## set results are repeatable
+set.seed(100)
+library(Boruta)
+boruta <- Boruta(select ~., data = d2015west, doTrace = 2)
+# green and red color show whether important or not, yellow indicates tentative 
+# features can't decided
+plot(boruta, las = 2, cex.axis = 0.5)
+plotImpHistory(boruta)
+# attStats(boruta)
+selectedAttributes <- names(boruta$finalDecision[boruta$finalDecision == "Confirmed"])
+
+# Tentative fix
+ten_fix <- TentativeRoughFix(boruta)
+ten_fix
+```
+## Modeling
+
+- The modeling approaches were straight forward. Since I was predicting whether the players who were selected in the All Star Team or not, it was a classification problem. It was broken down to two main modeling approaches, logistic modeling and classification trees. 
+
+- **Four different logistic models were created based on the 45 selected predictor.**
+- First model used the whole dataset to build a basic model.
+- The second model from the tree's variable importance was used. 
+- Third one we used all the important features from Boruta algorithm feature selection. 
+- The last one we created a penalized logistic regression model using important features that were selected from the Boruta algorithm. 
+
+- The model then went through stepwise optimization for both the Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC) criterion. 
+- From these optimal models, the team continued to iterate as well, working to remove variables with lesser significance without leading to large reductions in the overall performance of the model.
+
+A classification tree was also created based on all 45 selected predictors. Both decision tree and random forest used during classification tree creation. Both tree’s variable importance were then used in the creation of several logistic models.
+
+
+In order to determine the effectiveness of the predictive model created, the model was used to predict the East conference dataset in the 2015 season by using the West conference data model.  ideally, all the players who were selected previously in the season 2015 should be showing in our predictions.  We used several measure metrics to evaluate our model performance, such as accuracy, kappa, sensitivity and specificity.  
+
+
+### Save all prediction values in a data frame
+```{r, echo = TRUE}
+result_west <- data.frame(data2020_West_Aggr$Player)
+result_east <- data.frame(data2020_East_Aggr$Player)
+names(result_west) <- 'Player'
+names(result_east) <- 'Player'
+```
+
+
+### Logistic Regression Model
+```{r, echo = TRUE, message=FALSE, warning=FALSE}
+glmModel <- function (dataset) {
+  
+  model <- glm(data = dataset, 
+               select ~ sum_FGM + sum_FTM + sum_PTS + sum_PTS.FDP + sum_Total.FDP + 
+                        sum_PTS.DKP + sum_Total.DKP + sum_PTS.YHP + sum_Total.YHP + 
+                        mean_FGM + mean_FGA + mean_PTS + mean_TSA + mean_PTS.FDP + 
+                        mean_Offensive.FDP + mean_Total.FDP + mean_PTS.DKP + 
+                        mean_Offensive.DKP + mean_Total.DKP + mean_PTS.YHP + 
+                        mean_Offensive.YHP + mean_Total.YHP + rank_sum_FGM + 
+                        rank_sum_FTM + rank_sum_PTS + rank_sum_PTS.FDP + 
+                        rank_sum_Total.FDP + rank_sum_PTS.DKP + rank_sum_Total.DKP + 
+                        rank_sum_PTS.YHP + rank_sum_Total.YHP + rank_mean_FGM + 
+                        rank_mean_FGA + rank_mean_PTS + rank_mean_TSA + 
+                        rank_mean_PTS.FDP + rank_mean_Offensive.FDP + rank_mean_Total.FDP + 
+                        rank_mean_PTS.DKP + rank_mean_Offensive.DKP + rank_mean_Total.DKP + 
+                        rank_mean_PTS.YHP  + rank_mean_Offensive.YHP + rank_mean_Total.YHP, 
+               family = "binomial")
+  
+  pred_east <- predict(model, data2020_East_Aggr[ , -1])
+  pred_west <- predict(model, data2020_West_Aggr[ , -1])
+  
+  return (list(pred_east, pred_west))
+  
+}
+
+
+#---------Season 2015-------
+
+# use 2015 east dataset to build model and predict
+result_east["glm2015e"] <- glmModel(d2015east)[1]
+result_west["glm2015e"] <- glmModel(d2015east)[2]
+
+# use 2015 west dataset to build model and predict
+result_east["glm2015w"] <- glmModel(d2015west)[1]
+result_west["glm2015w"] <- glmModel(d2015west)[2]
+
+
+# ---------season 2016----------
+
+# use 2016 east dataset to build model and predict
+result_east["glm2016e"] <- glmModel(d2016east)[1]
+result_west["glm2016e"] <- glmModel(d2016east)[2]
+
+# use 2016 west dataset to build model and predict
+result_east["glm2016w"] <- glmModel(d2016west)[1]
+result_west["glm2016w"] <- glmModel(d2016west)[2]
+
+
+#-----------Season 2017------------
+
+# use 2017 east dataset to build model and predict
+result_east["glm2017e"] <- glmModel(d2017east)[1]
+result_west["glm2017e"] <- glmModel(d2017east)[2]
+
+# use 2017 west dataset to build model and predict
+result_east["glm2017w"] <- glmModel(d2017west)[1]
+result_west["glm2017w"] <- glmModel(d2017west)[2]
+
+
+# -------------Season 2018------------
+
+# use 2018 east dataset to build model and predict
+result_east["glm2018e"] <- glmModel(d2018east)[1]
+result_west["glm2018e"] <- glmModel(d2018east)[2]
+
+# use 2018 west dataset to build model and predict
+result_east["glm2018w"] <- glmModel(d2018west)[1]
+result_west["glm2018w"] <- glmModel(d2018west)[2]
+
+
+# -------------Season 2019-----------------
+
+# use 2019 east dataset to build model and predict
+result_east["glm2019e"] <- glmModel(d2019east)[1]
+result_west["glm2019e"] <- glmModel(d2019east)[2]
+
+# use 2019 west dataset to build model and predict
+result_east["glm2019w"] <- glmModel(d2019west)[1]
+result_west["glm2019w"] <- glmModel(d2019west)[2]
+
+```
+
+
+
+### Ridge regression
+```{r, echo = TRUE, warning=FALSE, message = FALSE}
+# ridge regression
+
+ridgeModel <- function(dataset) {
+  
+  ctrl <- trainControl (method = "cv", number = 10)
+  
+  model <- train(select ~ ., 
+                 data = dataset[ , -1],
+                 method = "glmnet",
+                 trControl = ctrl,
+                 tuneGrid = data.frame(alpha = 0, lambda = seq(0, 0.5, 0.9)))
+  
+  pred_east <- predict(model, data2020_East_Aggr[,-1])
+  pred_west <- predict(model, data2020_West_Aggr[,-1])
+  
+  return (list(pred_east, pred_west))
+  
+}
+
+#---------Season 2015-------
+
+# use 2015 east dataset to build model and predict
+result_east["ridge2015e"] <- ridgeModel(d2015east)[1]
+result_west["ridge2015e"] <- ridgeModel(d2015east)[2]
+
+# use 2015 west dataset to build model and predict
+result_east["ridge2015w"] <- ridgeModel(d2015west)[1]
+result_west["ridge2015w"] <- ridgeModel(d2015west)[2]
+
+
+# ---------season 2016----------
+
+# use 2016 east dataset to build model and predict
+result_east["ridge2016e"] <- ridgeModel(d2016east)[1]
+result_west["ridge2016e"] <- ridgeModel(d2016east)[2]
+
+# use 2016 west dataset to build model and predict
+result_east["ridge2016w"] <- ridgeModel(d2016west)[1]
+result_west["ridge2016w"] <- ridgeModel(d2016west)[2]
+
+
+#-----------Season 2017------------
+
+# use 2017 east dataset to build model and predict
+result_east["ridge2017e"] <- ridgeModel(d2017east)[1]
+result_west["ridge2017e"] <- ridgeModel(d2017east)[2]
+
+# use 2017 west dataset to build model and predict
+result_east["ridge2017w"] <- ridgeModel(d2017west)[1]
+result_west["ridge2017w"] <- ridgeModel(d2017west)[2]
+
+
+# -------------Season 2018------------
+
+# use 2018 east dataset to build model and predict
+result_east["ridge2018e"] <- ridgeModel(d2018east)[1]
+result_west["ridge2018e"] <- ridgeModel(d2018east)[2]
+
+# use 2018 west dataset to build model and predict
+result_east["ridge2018w"] <- ridgeModel(d2018west)[1]
+result_west["ridge2018w"] <- ridgeModel(d2018west)[2]
+
+
+# -------------Season 2019-----------------
+
+# use 2019 east dataset to build model and predict
+result_east["ridge2019e"] <- ridgeModel(d2019east)[1]
+result_west["ridge2019e"] <- ridgeModel(d2019east)[2]
+
+# use 2019 west dataset to build model and predict
+result_east["ridge2019w"] <- ridgeModel(d2019west)[1]
+result_west["ridge2019w"] <- ridgeModel(d2019west)[2]
+
+```
+
+
+
+### Classification trees modeling
+```{r, echo = TRUE, warning=FALSE, message=FALSE}
+library(rpart) # building tree
+library(party) # for visualizing trees
+library(partykit)
+
+
+rpartModel <- function(dataset) {
+  
+  model <- rpart(select ~ ., data = dataset[ , -1])
+  
+  pred_east <- predict(model, data2020_East_Aggr[ , -1])
+  pred_west <- predict(model, data2020_West_Aggr[ , -1])
+  
+  return (list(pred_east, pred_west))
+  
+}
+
+
+#---------Season 2015-------
+
+# use 2015 east dataset to build model and predict
+result_east["rpart2015e"] <- rpartModel(d2015east)[1]
+result_west["rpart2015e"] <- rpartModel(d2015east)[2]
+
+# use 2015 west dataset to build model and predict
+result_east["rpart2015w"] <- rpartModel(d2015west)[1]
+result_west["rpart2015w"] <- rpartModel(d2015west)[2]
+
+
+# ---------season 2016----------
+
+# use 2016 east dataset to build model and predict
+result_east["rpart2016e"] <- rpartModel(d2016east)[1]
+result_west["rpart2016e"] <- rpartModel(d2016east)[2]
+
+# use 2016 west dataset to build model and predict
+result_east["rpart2016w"] <- rpartModel(d2016west)[1]
+result_west["rpart2016w"] <- rpartModel(d2016west)[2]
+
+
+#-----------Season 2017------------
+
+# use 2017 east dataset to build model and predict
+result_east["rpart2017e"] <- rpartModel(d2017east)[1]
+result_west["rpart2017e"] <- rpartModel(d2017east)[2]
+
+# use 2017 west dataset to build model and predict
+result_east["rpart2017w"] <- rpartModel(d2017west)[1]
+result_west["rpart2017w"] <- rpartModel(d2017west)[2]
+
+
+# -------------Season 2018------------
+
+# use 2018 east dataset to build model and predict
+result_east["rpart2018e"] <- rpartModel(d2018east)[1]
+result_west["rpart2018e"] <- rpartModel(d2018east)[2]
+
+# use 2018 west dataset to build model and predict
+result_east["rpart2018w"] <- rpartModel(d2018west)[1]
+result_west["rpart2018w"] <- rpartModel(d2018west)[2]
+
+
+# -------------Season 2019-----------------
+
+# use 2019 east dataset to build model and predict
+result_east["rpart2019e"] <- rpartModel(d2019east)[1]
+result_west["rpart2019e"] <- rpartModel(d2019east)[2]
+
+# use 2019 west dataset to build model and predict
+result_east["rpart2019w"] <- rpartModel(d2019west)[1]
+result_west["rpart2019w"] <- rpartModel(d2019west)[2]
+
+```
+
+### Decision tree with cross-validation
+```{r, echo = TRUE, message=FALSE, warning=FALSE}
+dtModel <- function(dataset) {
+  
+  ctrl <- trainControl(method = "repeatedcv", number = 5, repeats = 10)
+  
+  tune <- train(select ~ ., data = dataset, method = "rpart", trControl = ctrl)
+  model <- rpart(select ~ ., data = dataset[ , -1], cp = tune$bestTune)
+  
+  pred_east <- predict(model, data2020_East_Aggr[ , -1])
+  pred_west <- predict(model, data2020_West_Aggr[ , -1])
+  
+  return (list(pred_east, pred_west))
+  
+}
+
+
+#---------Season 2015-------
+
+# use 2015 east dataset to build model and predict
+result_east["dt2015e"] <- dtModel(d2015east)[1]
+result_west["dt2015e"] <- dtModel(d2015east)[2]
+
+# use 2015 west dataset to build model and predict
+result_east["dt2015w"] <- dtModel(d2015west)[1]
+result_west["dt2015w"] <- dtModel(d2015west)[2]
+
+
+# ---------season 2016----------
+
+# use 2016 east dataset to build model and predict
+result_east["dt2016e"] <- dtModel(d2016east)[1]
+result_west["dt2016e"] <- dtModel(d2016east)[2]
+
+# use 2016 west dataset to build model and predict
+result_east["dt2016w"] <- dtModel(d2016west)[1]
+result_west["dt2016w"] <- dtModel(d2016west)[2]
+
+
+#-----------Season 2017------------
+
+# use 2017 east dataset to build model and predict
+result_east["dt2017e"] <- dtModel(d2017east)[1]
+result_west["dt2017e"] <- dtModel(d2017east)[2]
+
+# use 2017 west dataset to build model and predict
+result_east["dt2017w"] <- dtModel(d2017west)[1]
+result_west["dt2017w"] <- dtModel(d2017west)[2]
+
+
+# -------------Season 2018------------
+
+# use 2018 east dataset to build model and predict
+result_east["dt2018e"] <- dtModel(d2018east)[1]
+result_west["dt2018e"] <- dtModel(d2018east)[2]
+
+# use 2018 west dataset to build model and predict
+result_east["dt2018w"] <- dtModel(d2018west)[1]
+result_west["dt2018w"] <- dtModel(d2018west)[2]
+
+
+# -------------Season 2019-----------------
+
+# use 2019 east dataset to build model and predict
+result_east["dt2019e"] <- dtModel(d2019east)[1]
+result_west["dt2019e"] <- dtModel(d2019east)[2]
+
+# use 2019 west dataset to build model and predict
+result_east["dt2019w"] <- dtModel(d2019west)[1]
+result_west["dt2019w"] <- dtModel(d2019west)[2]
+
+
+```
+
+
+
+### Random forest model
+```{r, echo = TRUE, message=FALSE, warning=FALSE}
+library(ipred)
+library(randomForest)
+
+rfModel <- function(dataset) {
+  
+  model <- randomForest(select ~ ., 
+                        data = dataset[ , -1], 
+                        mtry = 4, 
+                        ntree = 800, 
+                        maxnodes = 25)
+  
+  pred_east <- predict(model, data2020_East_Aggr[ , -1])
+  pred_west <- predict(model, data2020_West_Aggr[ , -1])
+  
+  return (list(pred_east, pred_west))
+  
+}
+
+
+#---------Season 2015-------
+
+# use 2015 east dataset to build model and predict
+result_east["rf2015e"] <- rfModel(d2015east)[1]
+result_west["rf2015e"] <- rfModel(d2015east)[2]
+
+# use 2015 west dataset to build model and predict
+result_east["rf2015w"] <- rfModel(d2015west)[1]
+result_west["rf2015w"] <- rfModel(d2015west)[2]
+
+
+# ---------season 2016----------
+
+# use 2016 east dataset to build model and predict
+result_east["rf2016e"] <- rfModel(d2016east)[1]
+result_west["rf2016e"] <- rfModel(d2016east)[2]
+
+# use 2016 west dataset to build model and predict
+result_east["rf2016w"] <- rfModel(d2016west)[1]
+result_west["rf2016w"] <- rfModel(d2016west)[2]
+
+
+#-----------Season 2017------------
+
+# use 2017 east dataset to build model and predict
+result_east["rf2017e"] <- rfModel(d2017east)[1]
+result_west["rf2017e"] <- rfModel(d2017east)[2]
+
+# use 2017 west dataset to build model and predict
+result_east["rf2017w"] <- rfModel(d2017west)[1]
+result_west["rf2017w"] <- rfModel(d2017west)[2]
+
+
+# -------------Season 2018------------
+
+# use 2018 east dataset to build model and predict
+result_east["rf2018e"] <- rfModel(d2018east)[1]
+result_west["rf2018e"] <- rfModel(d2018east)[2]
+
+# use 2018 west dataset to build model and predict
+result_east["rf2018w"] <- rfModel(d2018west)[1]
+result_west["rf2018w"] <- rfModel(d2018west)[2]
+
+
+# -------------Season 2019-----------------
+
+# use 2019 east dataset to build model and predict
+result_east["rf2019e"] <- rfModel(d2019east)[1]
+result_west["rf2019e"] <- rfModel(d2019east)[2]
+
+# use 2019 west dataset to build model and predict
+result_east["rf2019w"] <- rfModel(d2019west)[1]
+result_west["rf2019w"] <- rfModel(d2019west)[2]
+```
+
+
+
+## Prediction
+
+### Normalization (min-max) and final prediction
+
+- Normalize all prediction values to range from 0 to 1
+- Summation: Sum up all scores to get the final score
+- Sort: See which side will be scored highest in final
+
+```{r, echo = TRUE, message=FALSE, warning=FALSE}
+
+# east
+norm_east <- preProcess(result_east, method = c("range"))
+final_result_east <- predict(norm_east, result_east)
+final_result_east$sum <- rowSums(final_result_east[ , -1])
+
+players_east <- data.frame(
+  final_result_east$Player, 
+  final_result_east$sum
+)[order(-final_result_east$sum), ]
+
+# west
+norm_west <- preProcess(result_west, method = c("range"))
+final_result_west <- predict(norm_west, result_west)
+final_result_west$sum <- rowSums(final_result_west[ , -1])
+
+players_west <- data.frame(
+  final_result_west$Player, 
+  final_result_west$sum
+)[order(-final_result_west$sum), ]
+
+players_east[1 : 12, ]
+players_west[1 : 12, ]
+
+```
+
+### Final result east
+
+With almost all the prediction values are used and summed up together, the best players will finally be the best that granted by all models. 
+
+```{r, echo = TRUE}
+players_east[1 : 12, ]$final_result_east.Player
+```
+
+### Final result west
+```{r, echo = TRUE}
+players_west[1 : 12, ]$final_result_west.Player
+```
+
+### Which side will win?
+```{r, echo = TRUE}
+sum(players_east[1 : 12, ]$final_result_east.sum)
+sum(players_west[1 : 12, ]$final_result_west.sum)
+```
+**West will win!!!**
