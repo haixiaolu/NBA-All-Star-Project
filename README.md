@@ -43,7 +43,7 @@ predict 2021 NBA all-star game 24 men roster
   - Random Forest 
 
   ### Approach
-  In order to determine the effectiveness of the predictive model created, the model was used to predict the East conference dataset in the 2015 season by using the West conference data model.  Ideally, all the players who were selected previously in the season 2015 should be showing in our predictions.  Several measure metrics were used to evaluate the model performance, such as accuracy, kappa, sensitivity and specificity, etc.. 
+  In order to determine the effectiveness of the predictive model created, the model was used to predict the East conference dataset in the 2015 season by using the West conference data model.  Ideally, all the players who were selected previously in the season 2015 should be showing in the predictions.  Several measure metrics were used to evaluate the model performance, such as accuracy, kappa, sensitivity and specificity, etc.. 
 
 
 
