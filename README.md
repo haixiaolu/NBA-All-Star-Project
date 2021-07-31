@@ -63,6 +63,10 @@ predict 2021 NBA all-star game 24 men roster
   <img src = "https://github.com/haixiaolu/NBA-all-star/blob/main/images/nba.png" width = "800" height = "500"> 
 
 
-## Future work
+# Update Future work
 Compare with the real results in Febuary of 2021. 
+
+## The Actual Roaster in 2021
+
+<img src = "https://github.com/haixiaolu/Lu_Portfolio/blob/main/images/NBA.png" width="500" height="300">
 
