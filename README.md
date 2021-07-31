@@ -68,5 +68,5 @@ Compare with the real results in Febuary of 2021.
 
 ## The Actual Roaster in 2021
 
-<img src = "https://github.com/haixiaolu/Lu_Portfolio/blob/main/images/NBA.png" width="500" height="300">
+<img src = "https://github.com/haixiaolu/Lu_Portfolio/blob/main/images/NBA.png" width="800" height="500">
 
